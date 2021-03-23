@@ -1,10 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import dialogflow
-import string
-import random
-import requests
-import json
 import utility
 from db import db, Mechanic
 
@@ -45,14 +41,14 @@ def webhook():
     if data['queryResult']['action'] == 'add_service':
         service = data['queryResult']['parameters']['service-type']
         reply = {"fulfillmentText": "Вам нужно оказать еще какую-нибудь услугу?",}
-        utility.update_session_info(session_id, 'service_types', service)
+        utility.session_info.update_session_info(session_id, 'service_types', service)
 
         return jsonify(reply)
 
     if data['queryResult']['action'] == 'choose_mechanic_schedule':
         mechanic = data['queryResult']['parameters']['mechanic']
 
-        utility.update_session_info(session_id, 'mechanic', mechanic)
+        utility.session_info.update_session_info(session_id, 'mechanic', mechanic)
 
         fullfillment_text = \
             'ПН'*(db.session.query().with_entities(Mechanic.mon, Mechanic.name).filter_by(name=mechanic, mon=1).scalar()
@@ -77,7 +73,7 @@ def webhook():
         return jsonify(reply)
 
     if data['queryResult']['action'] == 'choose_schedule':
-        utility.update_session_info(session_id, 'mechanic', 'any')
+        utility.session_info.update_session_info(session_id, 'mechanic', 'any')
 
         fullfillment_text = \
             'ПН' * bool(db.session.query(Mechanic.mon).filter_by(mon=1).count()) + ' ' + \
@@ -97,7 +93,7 @@ def webhook():
     if data['queryResult']['action'] == 'choose_day':
         day = data['queryResult']['parameters']['day-of-week']
 
-        mechanic_name = utility.get_session_info(session_id, 'mechanic', 0)[0]
+        mechanic_name = utility.session_info.get_session_info(session_id, 'mechanic', 0)[0]
         if mechanic_name != 'any':
             mechanic = Mechanic.query.filter_by(name=mechanic_name).first()
             if day == 'ПН':
@@ -139,15 +135,15 @@ def webhook():
 
         db.session.commit()
 
-        utility.update_session_info(session_id, 'day', day)
+        utility.session_info.update_session_info(session_id, 'day', day)
 
-        if utility.extract_session_info(session_id, 'mechanic')[0] != 'any':
-            fullfillment_text = 'Мы записали вас на ' + utility.extract_session_info(session_id, 'day')[0] + \
-                                ' к механику ' + utility.extract_session_info(session_id, 'mechanic')[0] + \
-                                ' на следующие услуги: ' + ', '.join(utility.extract_session_info(session_id, 'service_types')) + '.'
+        if utility.session_info.extract_session_info(session_id, 'mechanic')[0] != 'any':
+            fullfillment_text = 'Мы записали вас на ' + utility.session_info.extract_session_info(session_id, 'day')[0] + \
+                                ' к механику ' + utility.session_info.extract_session_info(session_id, 'mechanic')[0] + \
+                                ' на следующие услуги: ' + ', '.join(utility.session_info.extract_session_info(session_id, 'service_types')) + '.'
         else:
-            fullfillment_text = 'Мы записали вас на ' + utility.extract_session_info(session_id, 'day')[0] + \
-                                ' на следующие услуги: ' + ', '.join(utility.extract_session_info(session_id, 'service_types')) + '.'
+            fullfillment_text = 'Мы записали вас на ' + utility.session_info.extract_session_info(session_id, 'day')[0] + \
+                                ' на следующие услуги: ' + ', '.join(utility.session_info.extract_session_info(session_id, 'service_types')) + '.'
 
         reply = {"fulfillmentText": fullfillment_text}
 
