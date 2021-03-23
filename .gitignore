@@ -28,3 +28,6 @@ windowsandtires-gvot-cc296b80e403.json
 # Environmnet
 *.env
 *.flaskenv
+
+# PyCache
+*.pyc
