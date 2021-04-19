@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify, render_template
+from sqlalchemy import and_, or_, not_, extract
+from datetime import timedelta, datetime
 import os
 import dialogflow
+import arrow
 import utility
-from db import db, Mechanic
+from db import db, Employee, Schedule, Reservation, initalize_timetable
 
 
 app = Flask(__name__)
@@ -19,16 +22,16 @@ def detect_intent_texts(project_id, session_id, text, language_code):
     session = session_client.session_path(project_id, session_id)
 
     if text:
-        text_input = dialogflow.types.TextInput(
-            text=text, language_code=language_code)
+        text_input = dialogflow.types.TextInput(text=text, language_code=language_code)
         query_input = dialogflow.types.QueryInput(text=text_input)
-        response = session_client.detect_intent(
-            session=session, query_input=query_input)
+        response = session_client.detect_intent(session=session, query_input=query_input)
         return response.query_result.fulfillment_text
 
 
 @app.route('/')
 def index():
+    ## uncomment and run to set contents of all tables to the test dataset
+    # initalize_timetable(db)
     return render_template('index.html')
 
 
@@ -40,7 +43,7 @@ def webhook():
 
     if data['queryResult']['action'] == 'add_service':
         service = data['queryResult']['parameters']['service-type']
-        reply = {"fulfillmentText": "Вам нужно оказать еще какую-нибудь услугу?",}
+        reply = {"fulfillmentText": "Вам нужно оказать еще какую-нибудь услугу?"}
         utility.session_info.update_session_info(session_id, 'service_types', service)
 
         return jsonify(reply)
@@ -50,103 +53,107 @@ def webhook():
 
         utility.session_info.update_session_info(session_id, 'mechanic', mechanic)
 
-        fullfillment_text = \
-            'ПН'*(db.session.query().with_entities(Mechanic.mon, Mechanic.name).filter_by(name=mechanic, mon=1).scalar()
-                        is not None) + ' ' + \
-            'ВТ'*(db.session.query().with_entities(Mechanic.tue, Mechanic.name).filter_by(name=mechanic, tue=1).scalar()
-                        is not None) + ' ' + \
-            'СР'*(db.session.query().with_entities(Mechanic.wed, Mechanic.name).filter_by(name=mechanic, wed=1).scalar()
-                        is not None) + ' ' + \
-            'ЧТ'*(db.session.query().with_entities(Mechanic.thu, Mechanic.name).filter_by(name=mechanic, thu=1).scalar()
-                        is not None) + ' ' + \
-            'ПТ'*(db.session.query().with_entities(Mechanic.fri, Mechanic.name).filter_by(name=mechanic, fri=1).scalar()
-                        is not None) + ' ' + \
-            'СБ'*(db.session.query().with_entities(Mechanic.sat, Mechanic.name).filter_by(name=mechanic, sat=1).scalar()
-                        is not None) + ' ' + \
-            'ВС'*(db.session.query().with_entities(Mechanic.sun, Mechanic.name).filter_by(name=mechanic, sun=1).scalar()
-                        is not None)
+        emp_id = Employee.query.filter_by(name=mechanic).first().id
+        print('emp_id в choose_mechanic_schedule', emp_id)
+        fulfillment_text = "Ближайшие дни он работает: "
+        date_schedule = db.session.query(Schedule).filter(Schedule.emp_id == emp_id).all()[0:7]
 
-        fullfillment_text = 'Он свободен по следующим дням: ' + ', '.join([x.strip(' ') for x in fullfillment_text.split()]) + \
-            '. На какой день вас записать?'
-        reply = {"fulfillmentText": fullfillment_text}
+        for hours in date_schedule:
+            fulfillment_text += "\n" + str(hours.start.day) + " с " + str(hours.start.hour) + \
+                                " до " + str(hours.finish.hour) + ", "
+
+        fulfillment_text += ". Когда вам будет удобно?"
+        reply = {"fulfillmentText": fulfillment_text}
 
         return jsonify(reply)
 
     if data['queryResult']['action'] == 'choose_schedule':
         utility.session_info.update_session_info(session_id, 'mechanic', 'any')
-
-        fullfillment_text = \
-            'ПН' * bool(db.session.query(Mechanic.mon).filter_by(mon=1).count()) + ' ' + \
-            'ВТ' * bool(db.session.query(Mechanic.tue).filter_by(tue=1).count()) + ' ' + \
-            'СР' * bool(db.session.query(Mechanic.wed).filter_by(wed=1).count()) + ' ' + \
-            'ЧТ' * bool(db.session.query(Mechanic.thu).filter_by(thu=1).count()) + ' ' + \
-            'ПТ' * bool(db.session.query(Mechanic.fri).filter_by(fri=1).count()) + ' ' + \
-            'СБ' * bool(db.session.query(Mechanic.sat).filter_by(sat=1).count()) + ' ' + \
-            'ВС' * bool(db.session.query(Mechanic.sun).filter_by(sun=1).count())
-
-        fullfillment_text = 'Можете записаться на следующие дни: ' + ', '.join([x.strip(' ') for x in fullfillment_text.split()]) + \
-            '. На какой день вас записать?'
-        reply = {"fulfillmentText": fullfillment_text}
+        fulfillment_text = 'На какую дату вас записать?'
+        reply = {"fulfillmentText": fulfillment_text}
 
         return jsonify(reply)
 
-    if data['queryResult']['action'] == 'choose_day':
-        day = data['queryResult']['parameters']['day-of-week']
+    if data['queryResult']['action'] == 'choose_date_time':
+        date_time = data['queryResult']['parameters']['date-time']
+        print(date_time)
+        date_time = arrow.get(date_time['date_time']).datetime
+        print(date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute)
 
-        mechanic_name = utility.session_info.get_session_info(session_id, 'mechanic', 0)[0]
-        if mechanic_name != 'any':
-            mechanic = Mechanic.query.filter_by(name=mechanic_name).first()
-            if day == 'ПН':
-                mechanic.mon = 0
-            elif day == 'ВТ':
-                mechanic.tue = 0
-            elif day == 'СР':
-                mechanic.wed = 0
-            elif day == 'ЧТ':
-                mechanic.thu = 0
-            elif day == 'ПТ':
-                mechanic.fri = 0
-            elif day == 'СБ':
-                mechanic.sat = 0
-            elif day == 'ВС':
-                mechanic.sun = 0
+        services = utility.session_info.extract_session_info(session_id, 'service_types')
+        duration = 0
+        if 'мойка' in services: duration += 30
+        if 'шиномонтаж' in services: duration += 60
+        if 'замена стекла' in services: duration += 90
+
+        mechanic = utility.session_info.extract_session_info(session_id, 'mechanic')[0]
+        if mechanic == 'any':
+            emp_id = 0
         else:
-            if day == 'ПН':
-                mechanic = Mechanic.query.filter_by(mon=1).first()
-                mechanic.mon = 0
-            elif day == 'ВТ':
-                mechanic = Mechanic.query.filter_by(tue=1).first()
-                mechanic.tue = 0
-            elif day == 'СР':
-                mechanic = Mechanic.query.filter_by(wed=1).first()
-                mechanic.wed = 0
-            elif day == 'ЧТ':
-                mechanic = Mechanic.query.filter_by(thu=1).first()
-                mechanic.thu = 0
-            elif day == 'ПТ':
-                mechanic = Mechanic.query.filter_by(fri=1).first()
-                mechanic.fri = 0
-            elif day == 'СБ':
-                mechanic = Mechanic.query.filter_by(sat=1).first()
-                mechanic.sat = 0
-            elif day == 'ВС':
-                mechanic = Mechanic.query.filter_by(sun=1).first()
-                mechanic.sun = 0
+            emp_id = Employee.query.filter_by(name=mechanic).first().id
+        print(emp_id)
 
-        db.session.commit()
+        if not db.session.query(Schedule).filter(and_(or_(Schedule.emp_id == emp_id, emp_id == 0),
+                extract('day', Schedule.start) == date_time.day)).all():
+            fulfillment_text = "Извините, он не работает в этот день. Скажите другую дату, которая будет вам удобна"
+            if emp_id == 0: fulfillment_text = \
+                "Извините, в этот день никто не работает. Скажите другую дату, котрая будет вам удобна"
 
-        utility.session_info.update_session_info(session_id, 'day', day)
+            reply = {"fulfillmentText": fulfillment_text}
+            return jsonify(reply)
 
-        if utility.session_info.extract_session_info(session_id, 'mechanic')[0] != 'any':
-            fullfillment_text = 'Мы записали вас на ' + utility.session_info.extract_session_info(session_id, 'day')[0] + \
-                                ' к механику ' + utility.session_info.extract_session_info(session_id, 'mechanic')[0] + \
-                                ' на следующие услуги: ' + ', '.join(utility.session_info.extract_session_info(session_id, 'service_types')) + '.'
+        if not db.session.query(Schedule).filter(and_(or_(Schedule.emp_id == emp_id, emp_id == 0),
+                or_(extract('hour', Schedule.start) < date_time.hour,
+                and_(extract('hour', Schedule.start) == date_time.hour,
+                extract('minute', Schedule.start) <= date_time.minute)))).all():
+            fulfillment_text = "Извините, слишком рано. Выберите, пожалуйста, время попозже"
+
+            reply = {"fulfillmentText": fulfillment_text}
+            return jsonify(reply)
+
+        if not db.session.query(Schedule).filter(and_(or_(Schedule.emp_id == emp_id, emp_id == 0),
+                or_(extract('hour', Schedule.finish) > (date_time + timedelta(minutes=duration)).hour,
+                and_(extract('hour', Schedule.finish) == (date_time + timedelta(minutes=duration)).hour,
+                extract('minute', Schedule.finish) > (date_time + timedelta(minutes=duration)).minute)))).all():
+            fulfillment_text = "Извините, слишком поздно закончим. Выберите, пожалуйста, время пораньше"
+
+            reply = {"fulfillmentText": fulfillment_text}
+            return jsonify(reply)
+
+        def assignmnet_booked(emp_id, date_time, duration):
+            return db.session.query(Reservation).filter(and_(and_(extract('day', Reservation.begin) == date_time.day,
+                                                            Reservation.emp_id == emp_id),
+            not_(or_(or_(extract('hour', Reservation.begin) > (date_time + timedelta(minutes=duration)).hour,
+            and_(extract('hour', Reservation.begin) == (date_time + timedelta(minutes=duration)).hour,
+            extract('minute', Reservation.begin) >= (date_time + timedelta(minutes=duration)).minute)),
+            or_(extract('hour', Reservation.end) < date_time.hour,
+            and_(extract('hour', Reservation.end) == date_time.hour,
+            extract('minute', Reservation.end) <= date_time.minute)))))).all()
+
+        if emp_id:
+            if assignmnet_booked(emp_id, date_time, duration):
+                print(assignmnet_booked(emp_id, date_time, duration))
+                fulfillment_text = "Извините, это время уже зарезервировано. Выберите, пожалуйста, другое время"
+            else:
+                note = Reservation(begin=date_time, end=date_time+timedelta(minutes=duration), emp_id=emp_id)
+                db.session.add(note)
+                db.session.commit()
+                fulfillment_text = "Мы вас записали!"
+
         else:
-            fullfillment_text = 'Мы записали вас на ' + utility.session_info.extract_session_info(session_id, 'day')[0] + \
-                                ' на следующие услуги: ' + ', '.join(utility.session_info.extract_session_info(session_id, 'service_types')) + '.'
+            fulfillment_text = "Извините, это время уже зарезервировано. Выберите, пожалуйста, другое время"
+            for id in db.session.query(Employee.id).all()[0]:
+                print('emp_id в choose_date_time (механик указан)', id)
+                if assignmnet_booked(id, date_time, duration):
+                    print(assignmnet_booked(id, date_time, duration))
+                    pass
+                else:
+                    note = Reservation(begin=date_time, end=date_time+timedelta(minutes=duration), emp_id=id)
+                    db.session.add(note)
+                    db.session.commit()
+                    fulfillment_text = "Мы вас записали!"
 
-        reply = {"fulfillmentText": fullfillment_text}
-
+        reply = {"fulfillmentText": fulfillment_text}
         return jsonify(reply)
 
 
