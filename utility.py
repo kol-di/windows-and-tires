@@ -6,6 +6,13 @@ class SessionInfo:
         self.data.setdefault(session, {}).setdefault(key, []).append(value)
         return self.data
 
+    def change_session_info(self, session, key, value):
+        try:
+            self.data[session][key] = [value]
+        except KeyError:
+            self.data.setdefault(session, {}).setdefault(key, []).append(value)
+        return
+
     def extract_session_info(self, session, key):
         return self.data[session][key]
 
