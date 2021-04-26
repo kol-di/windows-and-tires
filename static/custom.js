@@ -1,22 +1,24 @@
-function submit_message(message) {
-        $.post( "/send_message", {message: message}, handle_response);
+function submit_message(message, uuid) {
+    $.post( "/send_message", {message: message, uuid: uuid}, handle_response);
 
-        function handle_response(data) {
-          // append the bot repsonse to the div
-          $('.chat-container').append(`
-                <div class="chat-message col-md-5 offset-md-7 bot-message">
-                    ${data.message}
-                </div>
-          `)
-          // remove the loading indicator
-          $( "#loading" ).remove();
-        }
+    function handle_response(data) {
+      // append the bot repsonse to the div
+      $('.chat-container').append(`
+            <div class="chat-message col-md-5 offset-md-7 bot-message">
+                ${data.message}
+            </div>
+      `)
+      // remove the loading indicator
+      $( "#loading" ).remove();
     }
+}
 
 
 $('#target').on('submit', function(e){
         e.preventDefault();
         const input_message = $('#input_message').val()
+        const uuid = $('#uuid').val()
+
         // return if the user does not enter any text
         if (!input_message) {
           return
@@ -39,5 +41,5 @@ $('#target').on('submit', function(e){
         $('#input_message').val('')
 
         // send the message
-        submit_message(input_message)
+        submit_message(input_message, uuid)
     });
